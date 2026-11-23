@@ -451,39 +451,55 @@ if(CAN_EMBED){
   window.onYouTubeIframeAPIReady=function(){YTready=true;if(pending>=0){var p=pending;pending=-1;playClip(p);}};
   var tg=document.createElement("script");tg.src="https://www.youtube.com/iframe_api";tg.onerror=function(){CAN_EMBED=false;};document.head.appendChild(tg);
 }
+/* Polls the player: an ad (content time not moving) stays hidden and muted;
+   the 10 seconds are counted on the song's own time, not on the wall clock. */
+var poll=null,phase="idle",lastT=null,waitSince=0;
+function hint(i,txt){var c=songSec(i).querySelector(".cover");c.classList.remove("hide");c.querySelector(".hint").textContent=txt;}
 function playClip(i){
   stopClip();curSong=i;
   var sec=songSec(i);
   if(!CAN_EMBED){fallback(i,"כאן אין נגן — צריך לפתוח את המצגת מהקישור");return;}
   if(!YTready){pending=i;return;}
   var st=startOf(i),p=players[i];
+  hint(i,"📼 מכינים את הקלטת...");
   if(!p){
     players[i]=new YT.Player(sec.querySelector(".yt"),{videoId:SONGS[i].v,
       playerVars:{start:st,playsinline:1,rel:0,controls:0,disablekb:1,iv_load_policy:3,fs:0},
       events:{
-        onReady:function(e){if(curSong===i){e.target.setVolume(100);e.target.seekTo(startOf(i),true);e.target.playVideo();}},
-        onStateChange:function(e){if(e.data===1&&curSong===i&&!timing)beginTimer(i);},
-        onError:function(){if(curSong===i)fallback(i,"הקליפ לא נפתח בתוך המצגת");}
+        onReady:function(e){if(curSong===i){e.target.mute();e.target.seekTo(startOf(i),true);e.target.playVideo();}},
+        onError:function(){if(curSong===i){stopPoll();fallback(i,"הקליפ לא נפתח בתוך המצגת");}}
       }});
-  }else if(p.seekTo){p.setVolume(100);p.seekTo(st,true);p.playVideo();}
+  }else if(p.seekTo){p.mute();p.seekTo(st,true);p.playVideo();}
+  phase="wait";lastT=null;waitSince=Date.now();
+  poll=setInterval(function(){tick(i);},200);
 }
-function beginTimer(i){
-  timing=true;var sec=songSec(i);
-  sec.querySelector(".cover").classList.add("hide");
-  sec.querySelector(".badge").classList.add("on");
-  var bar=sec.querySelector(".timer");bar.classList.remove("run");bar.style.transitionDuration="0s";bar.style.width="0";void bar.offsetWidth;
-  bar.style.transitionDuration=CLIP_SECONDS+"s";bar.classList.add("run");bar.style.width="100%";
-  clipTimer=setTimeout(function(){fadeOut(i);},CLIP_SECONDS*1000);
+function tick(i){
+  var p=players[i];if(curSong!==i||!p||!p.getCurrentTime)return;
+  var st=startOf(i),t=p.getCurrentTime(),s=p.getPlayerState(),sec=songSec(i);
+  if(phase==="wait"){
+    if(s===1&&lastT!==null&&t>lastT&&t>=st-0.5&&t<st+CLIP_SECONDS){
+      phase="play";p.unMute();p.setVolume(100);
+      sec.querySelector(".cover").classList.add("hide");sec.querySelector(".badge").classList.add("on");
+    }else if(Date.now()-waitSince>40000){stopPoll();try{p.pauseVideo();}catch(e){}fallback(i,"הקליפ לא התחיל לנגן");return;}
+    else if(Date.now()-waitSince>2500){hint(i,"⏳ יוטיוב מציג פרסומת קצרה — השיר מתחיל מיד");}
+    if(s===2&&Date.now()-waitSince>1500)p.playVideo();
+  }else if(phase==="play"){
+    var f=Math.max(0,Math.min(1,(t-st)/CLIP_SECONDS));
+    var bar=sec.querySelector(".timer");bar.style.transitionDuration="0s";bar.style.width=(f*100)+"%";
+    if(t>=st+CLIP_SECONDS-1&&!fadeTimer)fadeOut(i);
+  }
+  lastT=t;
 }
+function stopPoll(){clearInterval(poll);poll=null;phase="idle";}
 function fadeOut(i){
   var p=players[i],v=100;if(!p||!p.setVolume)return;
-  fadeTimer=setInterval(function(){v-=10;if(v<=0){clearInterval(fadeTimer);fadeTimer=null;p.pauseVideo();p.setVolume(100);endVisual(i);}else p.setVolume(v);},100);
+  fadeTimer=setInterval(function(){v-=10;if(v<=0){clearInterval(fadeTimer);fadeTimer=null;p.pauseVideo();p.setVolume(100);stopPoll();endVisual(i);}else p.setVolume(v);},100);
 }
 function endVisual(i){var sec=songSec(i);if(!sec)return;sec.querySelector(".badge").classList.remove("on");timing=false;}
 function stopClip(){
-  clearTimeout(clipTimer);clearInterval(fadeTimer);fadeTimer=null;pending=-1;
+  stopPoll();clearInterval(fadeTimer);fadeTimer=null;pending=-1;
   if(curSong>=0){var p=players[curSong];if(p&&p.pauseVideo){try{p.pauseVideo();p.setVolume(100);}catch(e){}}
-    var sec=songSec(curSong),bar=sec.querySelector(".timer");bar.classList.remove("run");bar.style.transitionDuration="0s";bar.style.width="0";endVisual(curSong);}
+    var sec=songSec(curSong),bar=sec.querySelector(".timer");bar.style.transitionDuration="0s";bar.style.width="0";endVisual(curSong);}
   curSong=-1;timing=false;
 }
 [].forEach.call(document.querySelectorAll(".again"),function(b){b.addEventListener("click",function(){
