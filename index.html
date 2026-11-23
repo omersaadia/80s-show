@@ -448,12 +448,29 @@ function fallback(i,why){
   cv.querySelector("a").href=ytUrl(i);
 }
 if(CAN_EMBED){
-  window.onYouTubeIframeAPIReady=function(){YTready=true;if(pending>=0){var p=pending;pending=-1;playClip(p);}};
+  window.onYouTubeIframeAPIReady=function(){YTready=true;if(pending>=0){var p=pending;pending=-1;playClip(p);}warmAll();};
   var tg=document.createElement("script");tg.src="https://www.youtube.com/iframe_api";tg.onerror=function(){CAN_EMBED=false;};document.head.appendChild(tg);
 }
 /* Polls the player: an ad (content time not moving) stays hidden and muted;
    the 10 seconds are counted on the song's own time, not on the wall clock. */
 var poll=null,phase="idle",lastT=null,waitSince=0;
+/* Warm-up: while the opening slides run, every clip loads muted and hidden,
+   so YouTube's pre-roll ad plays out before the song slide is reached. */
+function warmAll(){SONGS.forEach(function(s,i){setTimeout(function(){warm(i);},1200*i);});}
+function warm(i){
+  if(players[i]||curSong===i)return;
+  var st=startOf(i),since=Date.now(),wp=null;
+  players[i]=new YT.Player(songSec(i).querySelector(".yt"),{videoId:SONGS[i].v,
+    playerVars:{start:st,playsinline:1,rel:0,controls:0,disablekb:1,iv_load_policy:3,fs:0},
+    events:{
+      onReady:function(e){e.target.mute();if(curSong===i)e.target.seekTo(startOf(i),true);e.target.playVideo();
+        wp=setInterval(function(){
+          var p=players[i];if(curSong===i||Date.now()-since>90000){clearInterval(wp);return;}
+          if(p.getPlayerState()===1&&p.getCurrentTime()>startOf(i)+0.3){clearInterval(wp);p.pauseVideo();p.seekTo(startOf(i),true);}
+        },250);},
+      onError:function(){clearInterval(wp);if(curSong===i){stopPoll();fallback(i,"הקליפ לא נפתח בתוך המצגת");}}
+    }});
+}
 function hint(i,txt){var c=songSec(i).querySelector(".cover");c.classList.remove("hide");c.querySelector(".hint").textContent=txt;}
 function playClip(i){
   stopClip();curSong=i;
